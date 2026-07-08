@@ -1,38 +1,50 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
+
+const getTime = () => {
+  return new Date().toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
 
 function App() {
   const [message, setMessage] = useState("");
-  const [messages, setMessages] = useState([]);
+  const [uploadedFile, setUploadedFile] = useState(null);
+  const [messages, setMessages] = useState([
+    {
+      text: "Welcome! How can I help you today?",
+      sender: "bot",
+      time: getTime(),
+    },
+  ]);
   const [isTyping, setIsTyping] = useState(false);
+  const [activeTab, setActiveTab] = useState("chat");
 
   const messagesEndRef = useRef(null);
+  const fileInputRef = useRef(null);
 
-  const getTime = () => {
-    return new Date().toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
-
-  // 🔽 Auto scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isTyping]);
 
   const handleSend = async () => {
-    if (message.trim() === "") return;
+    const userText = message.trim();
+    if ((userText === "" && !uploadedFile) || isTyping) return;
 
-    // Add user message
+    setMessage("");
+    setIsTyping(true);
+    const fileToSend = uploadedFile;
+    setUploadedFile(null);
+
     setMessages((prev) => [
       ...prev,
       {
-        text: message,
+        text: userText || "Please review this file.",
         sender: "user",
         time: getTime(),
+        fileName: fileToSend?.name,
       },
     ]);
-
-    setIsTyping(true);
 
     try {
       const response = await fetch("http://localhost:5000/message", {
@@ -40,127 +52,316 @@ function App() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ text: message }),
+        body: JSON.stringify({
+          text: userText || "Please review this uploaded file.",
+          fileContext: fileToSend
+            ? {
+                name: fileToSend.name,
+                content: fileToSend.content,
+              }
+            : null,
+        }),
       });
 
       const data = await response.json();
 
-      // Delay for typing effect
-      setTimeout(() => {
-        setIsTyping(false);
-
-        setMessages((prev) => [
-          ...prev,
-          {
-            text: data.reply,
-            sender: "bot",
-            time: getTime(),
-          },
-        ]);
-      }, 1500);
-
-    } catch (error) {
-      setIsTyping(false);
-
       setMessages((prev) => [
         ...prev,
         {
-          text: "Server error ❌",
+          text: data.reply,
           sender: "bot",
           time: getTime(),
         },
       ]);
+    } catch (error) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          text: "Server error. Please try again.",
+          sender: "bot",
+          time: getTime(),
+        },
+      ]);
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
+  const clearChat = () => {
+    setUploadedFile(null);
+    setMessages([
+      {
+        text: "Welcome! How can I help you today?",
+        sender: "bot",
+        time: getTime(),
+      },
+    ]);
+  };
+
+  const handleFileUpload = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const maxSize = 150 * 1024;
+    const allowedTypes = [
+      "text/plain",
+      "text/markdown",
+      "text/csv",
+      "application/json",
+    ];
+    const allowedExtensions = [".txt", ".md", ".csv", ".json"];
+    const lowerName = file.name.toLowerCase();
+    const isAllowed =
+      allowedTypes.includes(file.type) ||
+      allowedExtensions.some((extension) => lowerName.endsWith(extension));
+
+    if (!isAllowed) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          text: "Please upload a text file: TXT, MD, CSV, or JSON.",
+          sender: "bot",
+          time: getTime(),
+        },
+      ]);
+      event.target.value = "";
+      return;
     }
 
-    setMessage("");
+    if (file.size > maxSize) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          text: "Please upload a file smaller than 150 KB.",
+          sender: "bot",
+          time: getTime(),
+        },
+      ]);
+      event.target.value = "";
+      return;
+    }
+
+    const content = await file.text();
+    setUploadedFile({
+      name: file.name,
+      content,
+    });
+    event.target.value = "";
   };
 
   return (
     <div style={styles.container}>
       <div style={styles.chatBox}>
+        <div style={styles.header}>
+          <div>
+            <div style={styles.headerTitle}>Support Assistant</div>
+            <div style={styles.headerSubtitle}>Online and ready to help</div>
+          </div>
 
-        {/* Header */}
-        <div style={styles.header}>ChatBot 🤖</div>
-
-        {/* Messages */}
-        <div style={styles.messages}>
-          {messages.map((msg, index) => (
-            <div
-              key={index}
-              style={{
-                ...styles.messageRow,
-                justifyContent:
-                  msg.sender === "user" ? "flex-end" : "flex-start",
-                alignItems: "center",
-              }}
-            >
-              {/* Bot Icon */}
-              {msg.sender === "bot" && (
-                <div style={styles.icon}>🤖</div>
-              )}
-
-              {/* Message */}
-              <div
-                style={{
-                  ...styles.messageBubble,
-                  backgroundColor:
-                    msg.sender === "user" ? "#007bff" : "#f1f1f1",
-                  color: msg.sender === "user" ? "#fff" : "#000",
-                }}
-              >
-                <div>{msg.text}</div>
-                <div style={styles.time}>{msg.time}</div>
-              </div>
-
-              {/* User Icon */}
-              {msg.sender === "user" && (
-                <div style={styles.icon}>👤</div>
-              )}
-            </div>
-          ))}
-
-          {/* Typing Indicator */}
-          {isTyping && (
-            <div style={{ ...styles.messageRow, justifyContent: "flex-start" }}>
-              <div style={styles.icon}>🤖</div>
-              <div style={{ ...styles.messageBubble, backgroundColor: "#f1f1f1" }}>
-                <div className="typing">
-                  <span>.</span>
-                  <span>.</span>
-                  <span>.</span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Auto Scroll Anchor */}
-          <div ref={messagesEndRef} />
-        </div>
-
-        {/* Input */}
-        <div style={styles.inputArea}>
-          <textarea
-            style={styles.input}
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                handleSend();
-              }
-            }}
-            placeholder="Type a message..."
-            rows={1}
-          />
-
-          <button style={styles.button} onClick={handleSend}>
-            Send
+          <button style={styles.clearButton} onClick={clearChat} type="button">
+            Clear
           </button>
         </div>
 
+        <div style={styles.tabBar}>
+          {[
+            { id: "chat", label: "Chat" },
+            { id: "faq", label: "FAQ" },
+            { id: "contact", label: "Contact" },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              style={{
+                ...styles.tabButton,
+                ...(activeTab === tab.id ? styles.activeTabButton : {}),
+              }}
+              onClick={() => setActiveTab(tab.id)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {activeTab === "chat" && (
+          <>
+            <div style={styles.messages}>
+              {messages.map((msg, index) => (
+                <div
+                  key={index}
+                  style={{
+                    ...styles.messageRow,
+                    justifyContent:
+                      msg.sender === "user" ? "flex-end" : "flex-start",
+                    alignItems: "center",
+                  }}
+                >
+                  {msg.sender === "bot" && (
+                    <img
+                      src="/robot-avatar.svg"
+                      alt="Robot"
+                      style={styles.botAvatar}
+                    />
+                  )}
+
+                  <div
+                    style={{
+                      ...styles.messageBubble,
+                      backgroundColor:
+                        msg.sender === "user" ? "#2563eb" : "#f3f4f6",
+                      color: msg.sender === "user" ? "#fff" : "#111827",
+                    }}
+                  >
+                    {msg.fileName && (
+                      <div style={styles.attachmentInMessage}>
+                        <span style={styles.attachmentIcon}>+</span>
+                        {msg.fileName}
+                      </div>
+                    )}
+                    <div>{msg.text}</div>
+                    <div style={styles.time}>{msg.time}</div>
+                  </div>
+
+                  {msg.sender === "user" && (
+                    <img
+                      src="/user-avatar.svg"
+                      alt="User"
+                      style={styles.userAvatar}
+                    />
+                  )}
+                </div>
+              ))}
+
+              {isTyping && (
+                <div
+                  style={{ ...styles.messageRow, justifyContent: "flex-start" }}
+                >
+                  <img
+                    src="/robot-avatar.svg"
+                    alt="Robot"
+                    style={styles.botAvatar}
+                  />
+                  <div
+                    style={{
+                      ...styles.messageBubble,
+                      backgroundColor: "#f3f4f6",
+                    }}
+                  >
+                    <div className="typing">
+                      <span>.</span>
+                      <span>.</span>
+                      <span>.</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div ref={messagesEndRef} />
+            </div>
+
+            {uploadedFile && (
+              <div style={styles.pendingAttachmentWrap}>
+                <div style={styles.pendingAttachment}>
+                  <span style={styles.pendingAttachmentIcon}>+</span>
+                  <span style={styles.pendingAttachmentName}>
+                    {uploadedFile.name}
+                  </span>
+                  <button
+                    type="button"
+                    style={styles.removeAttachmentButton}
+                    onClick={() => setUploadedFile(null)}
+                    title="Remove file"
+                  >
+                    x
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div style={styles.inputArea}>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json"
+                style={styles.hiddenFileInput}
+                onChange={handleFileUpload}
+              />
+              <button
+                style={styles.uploadButton}
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isTyping}
+                title="Upload file"
+              >
+                +
+              </button>
+              <textarea
+                style={styles.input}
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
+                placeholder="Type a message..."
+                rows={1}
+              />
+
+              <button
+                style={styles.button}
+                onClick={handleSend}
+                disabled={isTyping || (message.trim() === "" && !uploadedFile)}
+              >
+                Send
+              </button>
+            </div>
+          </>
+        )}
+
+        {activeTab === "faq" && (
+          <div style={styles.tabPanel}>
+            <h3 style={styles.panelTitle}>Frequently Asked Questions</h3>
+            <div style={styles.infoCard}>
+              <strong>What can this assistant do?</strong>
+              <p style={styles.infoText}>
+                It can answer questions, explain services, and help with basic
+                support requests.
+              </p>
+            </div>
+            <div style={styles.infoCard}>
+              <strong>How fast does it respond?</strong>
+              <p style={styles.infoText}>
+                Replies appear as soon as the backend receives a response.
+              </p>
+            </div>
+            <div style={styles.infoCard}>
+              <strong>Can I clear the conversation?</strong>
+              <p style={styles.infoText}>
+                Yes. Use the Clear button in the header to reset the chat.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "contact" && (
+          <div style={styles.tabPanel}>
+            <h3 style={styles.panelTitle}>Contact Support</h3>
+            <div style={styles.infoCard}>
+              <strong>Email</strong>
+              <p style={styles.infoText}>support@example.com</p>
+            </div>
+            <div style={styles.infoCard}>
+              <strong>Need help now?</strong>
+              <p style={styles.infoText}>
+                Go back to the Chat tab and send your question.
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Typing Animation */}
       <style>
         {`
           .typing span {
@@ -193,7 +394,7 @@ const styles = {
     justifyContent: "center",
     alignItems: "center",
     height: "100vh",
-    backgroundColor: "#ece5dd",
+    backgroundColor: "#eef2f7",
   },
   chatBox: {
     width: "400px",
@@ -203,18 +404,89 @@ const styles = {
     flexDirection: "column",
     borderRadius: "10px",
     overflow: "hidden",
-    boxShadow: "0px 0px 10px rgba(0,0,0,0.2)",
+    boxShadow: "0px 16px 40px rgba(15,23,42,0.18)",
   },
   header: {
-    padding: "15px",
-    backgroundColor: "#075e54",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "12px",
+    padding: "14px 15px",
+    backgroundColor: "#1e3a8a",
     color: "#fff",
+  },
+  headerTitle: {
     fontWeight: "bold",
+    fontSize: "16px",
+  },
+  headerSubtitle: {
+    marginTop: "3px",
+    fontSize: "12px",
+    opacity: 0.82,
+  },
+  clearButton: {
+    padding: "7px 10px",
+    border: "1px solid rgba(255,255,255,0.45)",
+    backgroundColor: "rgba(255,255,255,0.12)",
+    color: "#fff",
+    borderRadius: "8px",
+    cursor: "pointer",
+    fontSize: "12px",
+    fontWeight: "bold",
+  },
+  tabBar: {
+    display: "flex",
+    gap: "6px",
+    padding: "8px",
+    backgroundColor: "#e5e7eb",
+    borderBottom: "1px solid #d1d5db",
+  },
+  tabButton: {
+    flex: 1,
+    padding: "9px 10px",
+    border: "none",
+    backgroundColor: "transparent",
+    color: "#4b5563",
+    borderRadius: "8px",
+    cursor: "pointer",
+    fontSize: "13px",
+    fontWeight: "bold",
+  },
+  activeTabButton: {
+    backgroundColor: "#ffffff",
+    color: "#1e3a8a",
+    boxShadow: "0 1px 3px rgba(15,23,42,0.12)",
+  },
+  tabPanel: {
+    flex: 1,
+    padding: "16px",
+    backgroundColor: "#f8fafc",
+    overflowY: "auto",
+  },
+  panelTitle: {
+    margin: "0 0 14px",
+    color: "#111827",
+    fontSize: "17px",
+  },
+  infoCard: {
+    padding: "13px",
+    marginBottom: "10px",
+    backgroundColor: "#ffffff",
+    border: "1px solid #e5e7eb",
+    borderRadius: "10px",
+    color: "#111827",
+  },
+  infoText: {
+    margin: "6px 0 0",
+    color: "#4b5563",
+    fontSize: "14px",
+    lineHeight: 1.4,
   },
   messages: {
     flex: 1,
     padding: "10px",
     overflowY: "auto",
+    backgroundColor: "#f8fafc",
   },
   messageRow: {
     display: "flex",
@@ -226,6 +498,29 @@ const styles = {
     maxWidth: "70%",
     whiteSpace: "pre-wrap",
   },
+  attachmentInMessage: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "6px",
+    padding: "5px 8px",
+    marginBottom: "7px",
+    backgroundColor: "rgba(255,255,255,0.18)",
+    border: "1px solid rgba(255,255,255,0.3)",
+    borderRadius: "10px",
+    fontSize: "12px",
+    fontWeight: "bold",
+  },
+  attachmentIcon: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "16px",
+    height: "16px",
+    backgroundColor: "#ffffff",
+    color: "#2563eb",
+    borderRadius: "50%",
+    lineHeight: 1,
+  },
   time: {
     fontSize: "10px",
     marginTop: "5px",
@@ -233,13 +528,46 @@ const styles = {
     opacity: 0.7,
   },
   icon: {
-    fontSize: "20px",
+    minWidth: "28px",
+    fontSize: "12px",
+    fontWeight: "bold",
     margin: "0 8px",
+    textAlign: "center",
+  },
+  userAvatar: {
+    width: "32px",
+    height: "32px",
+    margin: "0 6px",
+    borderRadius: "50%",
+  },
+  botAvatar: {
+    width: "32px",
+    height: "32px",
+    margin: "0 6px",
+    borderRadius: "50%",
   },
   inputArea: {
     display: "flex",
+    gap: "8px",
     padding: "10px",
     borderTop: "1px solid #ccc",
+  },
+  hiddenFileInput: {
+    display: "none",
+  },
+  uploadButton: {
+    width: "38px",
+    minWidth: "38px",
+    height: "38px",
+    padding: "0",
+    border: "1px solid #cbd5e1",
+    backgroundColor: "#ffffff",
+    color: "#1e3a8a",
+    borderRadius: "50%",
+    cursor: "pointer",
+    fontSize: "22px",
+    lineHeight: "1",
+    fontWeight: "bold",
   },
   input: {
     flex: 1,
@@ -250,13 +578,64 @@ const styles = {
     resize: "none",
   },
   button: {
-    marginLeft: "10px",
     padding: "10px 15px",
     border: "none",
-    backgroundColor: "#075e54",
+    backgroundColor: "#2563eb",
     color: "#fff",
     borderRadius: "20px",
     cursor: "pointer",
+  },
+  pendingAttachmentWrap: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "flex-start",
+    padding: "8px 10px",
+    backgroundColor: "#f8fafc",
+    borderTop: "1px solid #bfdbfe",
+  },
+  pendingAttachment: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "7px",
+    maxWidth: "240px",
+    padding: "7px 8px",
+    backgroundColor: "#ffffff",
+    border: "1px solid #c7d2fe",
+    borderRadius: "12px",
+    color: "#1e3a8a",
+    fontSize: "12px",
+    boxShadow: "0 1px 3px rgba(15,23,42,0.1)",
+  },
+  pendingAttachmentIcon: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "20px",
+    height: "20px",
+    flex: "0 0 auto",
+    backgroundColor: "#eff6ff",
+    borderRadius: "6px",
+    color: "#2563eb",
+    fontWeight: "bold",
+  },
+  pendingAttachmentName: {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  removeAttachmentButton: {
+    width: "20px",
+    height: "20px",
+    flex: "0 0 auto",
+    border: "none",
+    backgroundColor: "#eef2ff",
+    color: "#475569",
+    borderRadius: "50%",
+    cursor: "pointer",
+    fontWeight: "bold",
+    lineHeight: "18px",
+    padding: 0,
   },
 };
 
